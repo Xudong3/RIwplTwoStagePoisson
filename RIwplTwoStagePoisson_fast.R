@@ -1,6 +1,6 @@
 #setting: notation
-N1=40 ## number of sampling cluster in the first stage (population level) 
-N2=40 ##number of elements in each sampling cluster (population level)
+N1=100 ## number of sampling cluster in the first stage (population level)
+N2=100 ##number of elements in each sampling cluster (population level)
 latitude<-1:N2
 longitude<-1:N1
 population<-expand.grid(lat=latitude,long=longitude)
@@ -867,115 +867,160 @@ abline(h=0)
 boxplot(cbind(Fitis_NML[,c(1:4)],Fitis_PL[,c(1:4)], Fitis_WPL[,c(1:4)]) ,   col=color)
 abline(h=0)
 
-#create a table for latex
 #install.packages("xtable")
 library(xtable)
+
 construct_header <- function(df, grp_names, span, align = "c", draw_line = T) {
-   if (length(align) == 1) align <- rep(align, length(grp_names))
-   if (!all.equal(length(grp_names), length(span), length(align)))
-      stop("grp_names and span have to have the same length!")
-   
-   if (ncol(df) < sum(span)) stop("Span has to be less or equal to the number of columns of df") 
-   
-   header <- mapply(function(s, a, grp) sprintf("\\multicolumn{%i}{%s}{%s}", s, a, grp),
-                    span, align, grp_names)
-   header <- paste(header, collapse = " & ")
-   header <- paste0(header, " \\\\")
-   
-   if (draw_line) {
-      # where do we span the lines:
-      min_vals <- c(1, 1 + cumsum(span)[1:(length(span) - 1)])
-      max_vals <- cumsum(span)
-      line <- ifelse(grp_names == "", "", 
-                     sprintf("\\cmidrule(lr){%i-%i}", min_vals, max_vals))
-      line <- paste(line[line != ""], collapse = " ")
-      
-      header <- paste0(header, "  ", line, "\n  ")
-   }
-   
-   addtorow <- list(pos = list(-1, -1, nrow(df)),
-                    command = c("\\hline\n  ", header, "\\hline\n  "))
-   return(addtorow)
+    if (length(align) == 1) align <- rep(align, length(grp_names))
+    if (!all.equal(length(grp_names), length(span), length(align)))
+    stop("grp_names and span have to have the same length!")
+    
+    if (ncol(df) < sum(span)) stop("Span has to be less or equal to the number of columns of df")
+    
+    header <- mapply(function(s, a, grp) sprintf("\\multicolumn{%i}{%s}{%s}", s, a, grp),
+    span, align, grp_names)
+    header <- paste(header, collapse = " & ")
+    header <- paste0(header, " \\\\")
+    
+    if (draw_line) {
+        # where do we span the lines:
+        min_vals <- c(1, 1 + cumsum(span)[1:(length(span) - 1)])
+        max_vals <- cumsum(span)
+        line <- ifelse(grp_names == "", "",
+        sprintf("\\cmidrule(lr){%i-%i}", min_vals, max_vals))
+        line <- paste(line[line != ""], collapse = " ")
+        
+        header <- paste0(header, "  ", line, "\n  ")
+    }
+    
+    addtorow <- list(pos = list(-1, -1, nrow(df)),
+    command = c("\\hline\n  ", header, "\\hline\n  "))
+    return(addtorow)
 }
 
-#bias and sd for uninformative sampling (NML, PL, WPL)
-df<- matrix(round(c(apply(Fit_NML, 2,  mean),apply(Fit_NML, 2, sd) , apply(Fit_PL, 2, mean),apply(Fit_PL, 2, sd), apply(Fit_WPL, 2, mean),apply(Fit_WPL, 2, sd)),2),
-            ncol=6 )
+
+install.packages("expm")
+library("expm") #use sqrtm function
+
+#define the squre root of J
+sqrtJ_PL<-array(0, c(4,4, LOTS))
+for ( i in 1:LOTS){
+    sqrtJ_PL[,,i]=sqrtm(J_PL[, , i])
+}
+
+sqrtJis_PL<-array(0, c(4,4, LOTS))
+for ( i in 1:LOTS){
+    sqrtJis_PL[,,i]=sqrtm(Jis_PL[, , i])
+}
+
+sqrtJ_WPL<-array(0, c(4,4, LOTS))
+for ( i in 1:LOTS){
+    sqrtJ_WPL[,,i]=sqrtm(J_WPL[, , i])
+}
+
+sqrtJis_WPL<-array(0, c(4,4, LOTS))
+for ( i in 1:LOTS){
+    sqrtJis_WPL[,,i]=sqrtm(Jis_WPL[, , i])
+}
+
+#define the squre root of G
+sqrtG_PL<-array(0, c(4,4, LOTS))
+for ( i in 1:LOTS){
+    sqrtG_PL[,,i]=sqrtm(G_PL[, , i])
+}
+
+sqrtGis_PL<-array(0, c(4,4, LOTS))
+for ( i in 1:LOTS){
+    sqrtGis_PL[,,i]=sqrtm(Gis_PL[, , i])
+}
+
+sqrtG_WPL<-array(0, c(4,4, LOTS))
+for ( i in 1:LOTS){
+    sqrtG_WPL[,,i]=sqrtm(G_WPL[, , i])
+}
+
+sqrtGis_WPL<-array(0, c(4,4, LOTS))
+for ( i in 1:LOTS){
+    sqrtGis_WPL[,,i]=sqrtm(Gis_WPL[, , i])
+}
+
+
+
+
+#bias,  sd (empirical standard deviation)  and estimated sd (G) for uninformative sampling (NML, PL, WPL)
+df<- matrix(c(apply(Fit_NML, 2,  mean), apply(Fit_NML, 2, sd), apply(Fit_PL, 2, mean), apply(Fit_PL, 2, sd),
+diag(apply(sqrtG_PL, 1:2,  mean)),  apply(Fit_WPL, 2, mean), apply(Fit_WPL, 2, sd),
+diag(apply(sqrtG_WPL, 1:2,  mean))),ncol=8)
 df<-cbind(c("alpha", "beta", "sigma^2", "tau^2"), df)
-colnames(df)<-c("", rep(c("bias", "sd"), 3))
-df           
+colnames(df)<-c("",c("bias", "sd"), rep(c("bias", "sd","G^(-\frac{1}{2})"), 2))
+df
 df_header <- construct_header(
-   # the data.frame or matrix that should be plotted  
-   df,
-   # the labels of the groups that we want to insert
-   grp_names = c("uninformtive", "NML", "PL", "WPL"), 
-   # the number of columns each group spans
-   span = c(1, 2, 2, 2), 
-   # the alignment of each group, can be a single character (lcr) or a vector
-   align = "c"
-)           
-print(xtable(df), add.to.row = df_header, include.rownames = F, hline.after = F)      
+# the data.frame or matrix that should be plotted
+df,
+# the labels of the groups that we want to insert
+grp_names = c("uninformtive", "NML", "PL", "WPL"),
+# the number of columns each group spans
+span = c(1, 2, 3, 3),
+# the alignment of each group, can be a single character (lcr) or a vector
+align = "c"
+)
+print(xtable(df), add.to.row = df_header, include.rownames = F, hline.after = F)
 
 
-
-
-#variance estimator for uninformative sampling (PL, WPL)          
-vardf<-matrix(round(c(diag(apply(G_PL, 1:2,  mean)),diag(apply(J_PL, 1:2, mean)) , apply(PS_PL, 2, mean),
-                      apply(PS_PL, 2, sd), diag(apply(G_WPL, 1:2,  mean)),diag(apply(J_WPL, 1:2, mean)) , apply(PS_WPL, 2, mean),
-                      apply(PS_WPL, 2, sd)),2), ncol=8 )
+#variance estimator (sd of PS and  J) for uninformative sampling (PL, WPL)
+vardf<-matrix(c( apply(PS_PL, 2, mean),apply(PS_PL, 2, sd),diag(apply(sqrtJ_PL, 1:2, mean)) ,
+apply(PS_WPL, 2, mean),apply(PS_WPL, 2, sd), diag(apply(sqrtJ_WPL, 1:2, mean))),ncol=6)
 vardf<-cbind(c("alpha", "beta", "sigma^2", "tau^2"), vardf)
-colnames(vardf)<-c("parameter", rep(c("G", "J", "mean of PS", "sd of PS"), 2))
-vardf       
+colnames(vardf)<-c("parameter", rep(c("mean of PS", "sd of PS", "J^{\frac{1}{2}}"), 2))
+vardf
 vardf_header <- construct_header(
-   # the data.frame or matrix that should be plotted  
-   vardf,
-   # the labels of the groups that we want to insert
-   grp_names = c("",  "PL", "WPL"), 
-   # the number of columns each group spans
-   span = c(1, 4, 4), 
-   # the alignment of each group, can be a single character (lcr) or a vector
-   align = "c"
-)           
-print(xtable(vardf), add.to.row = vardf_header, include.rownames = F, hline.after = F)  
+# the data.frame or matrix that should be plotted
+vardf,
+# the labels of the groups that we want to insert
+grp_names = c("",  "PL", "WPL"),
+# the number of columns each group spans
+span = c(1, 3, 3),
+# the alignment of each group, can be a single character (lcr) or a vector
+align = "c"
+)
+print(xtable(vardf), add.to.row = vardf_header, include.rownames = F, hline.after = F)
 
 
 #bias and sd for informative sampling (NML, PL, WPL)
-dfis<- matrix(round(c(apply(Fitis_NML, 2,  mean),apply(Fitis_NML, 2, sd) , apply(Fitis_PL, 2, mean),apply(Fitis_PL, 2, sd), apply(Fitis_WPL, 2, mean),apply(Fitis_WPL, 2, sd)),2),
-              ncol=6 )
+dfis<- matrix(c(apply(Fitis_NML, 2,  mean),apply(Fitis_NML, 2, sd) , apply(Fitis_PL, 2, mean),apply(Fitis_PL, 2, sd),
+diag(apply(sqrtGis_PL, 1:2,  mean)),
+apply(Fitis_WPL, 2, mean),apply(Fitis_WPL, 2, sd),diag(apply(sqrtGis_WPL, 1:2,  mean))),  ncol=8 )
 dfis<-cbind(c("alpha", "beta", "sigma^2", "tau^2"), dfis)
-colnames(dfis)<-c("parameter", rep(c("bias", "sd"), 3))
-dfis           
+colnames(dfis)<-c("parameter", c("bias", "sd"), rep(c("bias", "sd", "G^{-\frac{1}{2}}"), 2))
+dfis
 dfis_header <- construct_header(
-   # the data.frame or matrix that should be plotted  
-   dfis,
-   # the labels of the groups that we want to insert
-   grp_names = c("", "NML", "PL", "WPL"), 
-   # the number of columns each group spans
-   span = c(1, 2, 2, 2), 
-   # the alignment of each group, can be a single character (lcr) or a vector
-   align = "c"
-)           
-print(xtable(dfis), add.to.row = dfis_header, include.rownames = F, hline.after = F)  
+# the data.frame or matrix that should be plotted
+dfis,
+# the labels of the groups that we want to insert
+grp_names = c("", "NML", "PL", "WPL"),
+# the number of columns each group spans
+span = c(1, 2, 3, 3),
+# the alignment of each group, can be a single character (lcr) or a vector
+align = "c"
+)
+print(xtable(dfis), add.to.row = dfis_header, floating=TRUE,  include.rownames = F, hline.after = F)
 
-#variance estimator for informative sampling (PL, WPL)          
-vardfis<-matrix(round(c(diag(apply(Gis_PL, 1:2,  mean)),diag(apply(Jis_PL, 1:2, mean)) , apply(PSis_PL, 2, mean),
-                        apply(PSis_PL, 2, sd), diag(apply(Gis_WPL, 1:2,  mean)),diag(apply(Jis_WPL, 1:2, mean)) , apply(PSis_WPL, 2, mean),
-                        apply(PSis_WPL, 2, sd)),2), ncol=8 )
+#variance estimator for informative sampling (PL, WPL)
+vardfis<-matrix(round(c( apply(PSis_PL, 2, mean),apply(PSis_PL, 2, sd), diag(apply(sqrtJis_PL, 1:2, mean)),
+apply(PSis_WPL, 2, mean),apply(PSis_WPL, 2, sd), diag(apply(sqrtJis_WPL, 1:2, mean)) ),2), ncol=6 )
 vardfis<-cbind(c("alpha", "beta", "sigma^2", "tau^2"), vardfis)
-colnames(vardfis)<-c("parameter", rep(c("G", "J", "mean of PS", "sd of PS"), 2))
-vardfis   
+colnames(vardfis)<-c("parameter", rep(c( "mean of PS", "sd of PS", "J^{\frac{1}{2}}"), 2))
+vardfis
 vardfis_header <- construct_header(
-   # the data.frame or matrix that should be plotted  
-   vardfis,
-   # the labels of the groups that we want to insert
-   grp_names = c("",  "PL", "WPL"), 
-   # the number of columns each group spans
-   span = c(1, 4, 4), 
-   # the alignment of each group, can be a single character (lcr) or a vector
-   align = "c"
-)           
+# the data.frame or matrix that should be plotted
+vardfis,
+# the labels of the groups that we want to insert
+grp_names = c("",  "PL", "WPL"),
+# the number of columns each group spans
+span = c(1, 3, 3),
+# the alignment of each group, can be a single character (lcr) or a vector
+align = "c"
+)
 print(xtable(vardfis), add.to.row = vardfis_header, include.rownames = F, hline.after = F)  
-
-
 
 
