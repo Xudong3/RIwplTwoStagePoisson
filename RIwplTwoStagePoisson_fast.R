@@ -964,8 +964,9 @@ df<- matrix(c(apply(Fit_NML, 2,  mean), apply(Fit_NML, 2, sd), apply(Fit_PL, 2, 
               apply(sqrt_diagG_PL, 2, mean),  apply(Fit_WPL, 2, mean), apply(Fit_WPL, 2, sd),
               apply(sqrt_diagG_WPL, 2, mean)),ncol=8)
 df[, c(1,3, 5, 6, 8)]=df[, c(1, 3, 5, 6, 8 )]*100
+df<-round(df, 2)
 df<-cbind(c("beta_0", "beta_1", "sigma^2", "tau^2"), df)
-colnames(df)<-c("",c("bias", "sd"), rep(c("bias", "sd","esd"), 2))
+colnames(df)<-c("",c("bias*100", "sd"), rep(c("bias*100", "sd","esd*100"), 2))
 df
 df_header <- construct_header(
 # the data.frame or matrix that should be plotted
@@ -1007,12 +1008,13 @@ dfis<- matrix(c(apply(Fitis_NML, 2,  mean), apply(Fitis_NML, 2, sd), apply(Fitis
 
 
 df[, c(1,3, 5, 6, 8)]=df[, c(1, 3, 5, 6, 8 )]*100
+dfis=round(dfis, 2)
 dfis<-cbind(c("beta_0", "beta_1", "sigma^2", "tau^2"), dfis)
-colnames(dfis)<-c("parameter", c("bias", "sd"), rep(c("bias", "sd", "esd"), 2))
+colnames(dfis)<-c("parameter", c("bias*100", "sd"), rep(c("bias*100", "sd", "esd*100"), 2))
 dfis
 dfis_header <- construct_header(
 # the data.frame or matrix that should be plotted
-dfis,
+dfis
 # the labels of the groups that we want to insert
 grp_names = c("", "NML", "PL", "WPL"),
 # the number of columns each group spans
@@ -1026,7 +1028,7 @@ print(xtable(dfis), add.to.row = dfis_header, include.rownames = F,  hline.after
 vardfis<-matrix(c( apply(PSis_PL, 2, mean),apply(PSis_PL, 2, sd),  apply(sqrt_diagJis_PL, 2, mean) ,
                    apply(PSis_WPL, 2, mean),apply(PSis_WPL, 2, sd),  apply(sqrt_diagJis_WPL, 2, mean)),ncol=6)
 vardfis<-round(vardfis,2)
-vardfis<-cbind(c("alpha", "beta", "sigma^2", "tau^2"), vardfis)
+vardfis<-cbind(c("beta_0", "beta_1", "sigma^2", "tau^2"), vardfis)
 colnames(vardfis)<-c("parameter", rep(c( "mean of PS", "sd of PS", "esd of PS"), 2))
 vardfis
 vardfis_header <- construct_header(
