@@ -595,7 +595,7 @@ sanestimatoris_WPL= solve(estHis_WPL)%*% estJis_WPL%*% t(solve(estHis_WPL))
 
 #simulation
 
-LOTS=200
+LOTS=150
 #Fit from NML,PL, WPL for uninformative sampling
 Fit_NML<-matrix(0,nrow=LOTS,ncol=4)
 Fit_PL<-matrix(0,nrow=LOTS,ncol=4)
@@ -948,7 +948,7 @@ vardf_header <- construct_header(
    # the data.frame or matrix that should be plotted
    vardf,
    # the labels of the groups that we want to insert
-   grp_names = c("",  "PL", "WPL"),
+   grp_names = c("",  "Pairwise score", "Weighted pairwise score"),
    # the number of columns each group spans
    span = c(1, 3, 3),
    # the alignment of each group, can be a single character (lcr) or a vector
@@ -987,7 +987,7 @@ vardfis_header <- construct_header(
    # the data.frame or matrix that should be plotted
    vardfis,
    # the labels of the groups that we want to insert
-   grp_names = c("",  "PL", "WPL"),
+   grp_names = c("",  "Pairwise score", "Weighted pairwise score"),
    # the number of columns each group spans
    span = c(1, 3, 3),
    # the alignment of each group, can be a single character (lcr) or a vector
