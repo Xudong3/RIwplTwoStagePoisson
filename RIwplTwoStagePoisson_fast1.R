@@ -1,6 +1,14 @@
+
+
+#install.packages(c("sampling", rockchalk", "matrixcalc", "lme4","numDeriv", "RColorBrewer","xtable"))
+packages<-c("sampling", "rockchalk", "matrixcalc", "lme4", "numDeriv", "RColorBrewer","xtable" )
+lapply(packages, library,character.only = TRUE)
+dyn.load("RIFourOrdPiTwostagePoisson.so")
+
+
 #setting: notation
-N1=50 #  number of sampling cluster in the first stage (population level)
-N2=60 ##number of elements in each sampling cluster (population level)
+N1=100 #  number of sampling cluster in the first stage (population level)
+N2=100 ##number of elements in each sampling cluster (population level)
 latitude<-1:N2
 longitude<-1:N1
 population<-expand.grid(lat=latitude,long=longitude)
@@ -30,9 +38,9 @@ table(table(population$PSU))
 
 #Model: parameter from random intercept model
 truebeta1=1
-truebeta2=2
-truesigma2=1.3
-truetau2=1.5
+truebeta2=3
+truesigma2=1
+truetau2=0.5
 truevalue<-c(truebeta1,truebeta2, truesigma2, truetau2)
 names(truevalue)<-c("beta1", "beta2", "sigma2", "tau2")
 
@@ -44,11 +52,9 @@ population$y<-with(population, truebeta1+truebeta2*x+u+rnorm(N1*N2,s=sqrt(truesi
 population$r=with(population, x*(y-truebeta1-truebeta2*x))
 population$ID_unit=with(population, 1:(N1*N2))
 
+range(population$r)
 
 #uninformative two-stage sampling design (first-stage: Poisson, Second-stage:SRSWOR)
-#install.packages("sampling")
-library("sampling")
-
 ##uninformative Poisson first-stage 
 pi1=runif(N1) ## sampling inclusion probability for sampling cluster
 FirststagePoisson=UPpoisson(pi1)
@@ -57,15 +63,14 @@ n1=sum(FirststagePoisson) # number of PSU in the first-stage sample
 FirststagePoissonSample=subset(population, population$PSU%in% which(FirststagePoisson==1))
 
 #uninformative SRSWOR second-stage  
-n2=ceiling(N2/5)##number of elements in each sampling cluster ( sample level)
+n2=ceiling(N2/10)##number of elements in each sampling cluster ( sample level)
 SecondstageSRSWOR=unlist(lapply(rep(n2,n1), function(v) return(srswor(v, N2))))
 TwostagePoissonSample<-FirststagePoissonSample[c(which(SecondstageSRSWOR==1)), ]
 
 
 #informative two-stage sampling design (first-stage: Poisson, Second-stage:SRSWOR)
-
 #informative Poisson first-stage sample
-param1=c(0.5, 0.8)
+param1=c(0.05, 0.45)
 pi1informative= function(r, sc,  param, N1){
    a=rep(NA, N1)
    b=rep(NA, N1)
@@ -82,21 +87,26 @@ FirststagePoissonSampleis=subset(population, population$PSU%in% which(Firststage
 
 
 #informative second-stage sample(SRSWOR)
-param2=c(0.5, 0.5)
-n2informative= function(r, sc, param, N2){
-   a=rep(NA, length=length(unique(population$sc)))
-   b=rep(NA, length=length(unique(population$sc)))
-   for (i in unique(sc)){
-      a[i]=mean(r[sc==i])
-      b[i]=2*ceiling((param[1]*exp(-param[2]*a[i]))/(1 +param[1]*exp(-param[2]*a[i]))*N2/2)
-   }
-   b
-}
+#param2=c(0.05, 0.45)
+#n2informative= function(r, sc, param, N2){
+#   a=rep(NA, length=length(unique(population$sc)))
+#   b=rep(NA, length=length(unique(population$sc)))
+#   for (i in unique(sc)){
+#      a[i]=mean(r[sc==i])
+#      b[i]=2*ceiling((param[1]*exp(-param[2]*a[i]))/(1 +param[1]*exp(-param[2]*a[i]))*N2/2)
+#   }
+#   b
+#}
 
-n2pop=n2informative(population$r,population$PSU, param2 ,N2)
-n2is=n2pop*FirststagePoissonis
+#n2pop=n2informative(population$r,population$PSU, param2 ,N2)
+#n2is=n2pop*FirststagePoissonis
+#SecondstageSRSWORis=unlist(lapply(n2is[c(which(n2is!=0))], function(v) return(srswor(v, N2))))
+#TwostagePoissonSampleis=FirststagePoissonSampleis[c(which(SecondstageSRSWORis==1)), ]
+
+n2is=n2*FirststagePoissonis
 SecondstageSRSWORis=unlist(lapply(n2is[c(which(n2is!=0))], function(v) return(srswor(v, N2))))
 TwostagePoissonSampleis=FirststagePoissonSampleis[c(which(SecondstageSRSWORis==1)), ]
+
 
 
 #check
@@ -105,9 +115,6 @@ summary(TwostagePoissonSample$y)
 summary(TwostagePoissonSampleis$y)
 
 #Estimation: full-likelihood
-#install.packages("lme4")
-library(lme4)
-
 ##Census estimator 
 lmer(y~(1|cluster)+x,data=population)
 
@@ -170,6 +177,60 @@ dtau2<-function(y1,y2, g1,g2, x1,x2,alpha, beta,sigma2,tau2){
 
 
 
+##Define the pairwise score function and checking the pairwise score at PML (without weight)
+pairscore_PL<-function(y,g,x, theta){
+   n<-length(y)
+   ij=expand.grid(1:n,1:n)
+   ij<-ij[ij[,1]<ij[,2],]
+   ij<-ij[g[ij[,1]]==g[ij[,2]],]
+   i<-ij[,1]
+   j<-ij[,2]
+   
+   incrementda=dalpha(y[i],y[j],g[i],g[j],x[i],x[j], alpha=theta[1],beta=theta[2],
+                      sigma2=theta[3],tau2=theta[4])
+   incrementdb=dbeta(y[i],y[j],g[i],g[j],x[i],x[j],alpha=theta[1],beta=theta[2],
+                     sigma2=theta[3],tau2=theta[4])
+   incrementds=dsigma2(y[i],y[j],g[i],g[j],x[i],x[j],alpha=theta[1],beta=theta[2],
+                       sigma2=theta[3],tau2=theta[4])
+   incrementdt=dtau2(y[i],y[j],g[i],g[j],x[i],x[j], alpha=theta[1],beta=theta[2],
+                     sigma2=theta[3],tau2=theta[4])
+   
+   c(sum(incrementda), sum(incrementdb), sum(incrementds),sum(incrementdt))/T
+}
+
+cenfit_PL<-function(y,g,x, pars){
+   n<-length(y)
+   ij=expand.grid(1:n,1:n)
+   ij<-ij[ij[,1]<ij[,2],]
+   ij<-ij[g[ij[,1]]==g[ij[,2]],]
+   i<-ij[,1]
+   j<-ij[,2]
+   
+   func1<-function(theta){
+      increment=l2(y[i],y[j],g[i],g[j],x[i],x[j], alpha=theta[1],beta=theta[2],
+                   sigma2=theta[3],tau2=theta[4])
+      sum(increment)/T
+   }
+   gr<-function(theta){
+      incrementda=dalpha(y[i],y[j],g[i],g[j],x[i],x[j], alpha=theta[1],beta=theta[2],
+                         sigma2=theta[3],tau2=theta[4])
+      incrementdb=dbeta(y[i],y[j],g[i],g[j],x[i],x[j],alpha=theta[1],beta=theta[2],
+                        sigma2=theta[3],tau2=theta[4])
+      incrementds=dsigma2(y[i],y[j],g[i],g[j],x[i],x[j], alpha=theta[1],beta=theta[2],
+                          sigma2=theta[3],tau2=theta[4])
+      incrementdt=dtau2(y[i],y[j],g[i],g[j],x[i],x[j], alpha=theta[1],beta=theta[2],
+                        sigma2=theta[3],tau2=theta[4])
+      c(sum(incrementda), sum(incrementdb), sum(incrementds), sum(incrementdt))/T
+   }
+   optim(pars,func1, gr, method="L-BFGS-B", lower=c(-Inf, -Inf, 0.1, 0),control=list(fnscale=-1,parscale=c(1/n^0.2,1/n^0.2,1/n^0.2, 1/n^0.2)))
+}
+
+
+###census PL estimator 
+cen_PL<- cenfit_PL(y=population$y, g=population$cluster, x=population$x, pars=truevalue)
+cen_PL[[1]]-truevalue
+pairscore_PL(y=population$y,g=population$cluster, x=population$x, cen_PL[[1]])
+
 #optimization problem for PL (without weight)
 fit_PL<-function(y,g,x, pars){
    n<-length(y)
@@ -195,7 +256,7 @@ fit_PL<-function(y,g,x, pars){
                         sigma2=theta[3],tau2=theta[4])
       c(sum(incrementda), sum(incrementdb), sum(incrementds), sum(incrementdt))/T
    }
-   optim(pars,func1, gr, method="BFGS",control=list(fnscale=-1))
+   optim(pars,func1, gr, method="L-BFGS-B", lower=c(-Inf, -Inf, 0.1, 0) ,control=list(fnscale=-1, parscale=c(1/n^(1/2),1/n^(1/2),1/n^(1/2),1/n^(1/2))))
 }
 
 
@@ -203,6 +264,10 @@ fit_PL<-function(y,g,x, pars){
 estimator_PL<-fit_PL(TwostagePoissonSample$y, TwostagePoissonSample$cluster, TwostagePoissonSample$x, pars=truevalue)
 estimator_PL[[1]]-truevalue
 
+###uninformative at the estimated value
+pairscore_PL(y=TwostagePoissonSample$y,g=TwostagePoissonSample$cluster, x=TwostagePoissonSample$x, estimator_PL[[1]])
+###uninformative at the true value
+pairscore_PL(y=TwostagePoissonSample$y,g=TwostagePoissonSample$cluster, x=TwostagePoissonSample$x, truevalue)
 
 fitis_PL<-function(y,g,x, pars){
    n<-length(y)
@@ -228,42 +293,12 @@ fitis_PL<-function(y,g,x, pars){
                         sigma2=theta[3],tau2=theta[4])
       c(sum(incrementda), sum(incrementdb), sum(incrementds), sum(incrementdt))/T
    }
-   optim(pars,func1, gr, method="BFGS",control=list(fnscale=-1))
+   optim(pars,func1, gr, method="L-BFGS-B", lower=c(-Inf, -Inf, 0.1, 0),control=list(fnscale=-1))
 }
 
 ###informative sampling (without weight)
 estimatoris_PL<- fitis_PL(TwostagePoissonSampleis$y, TwostagePoissonSampleis$cluster, TwostagePoissonSampleis$x, pars=truevalue)
 estimatoris_PL[[1]]-truevalue
-
-
-##Define the pairwise score function and checking the pairwise score at PML (without weight)
-pairscore_PL<-function(y,g,x, theta){
-   n<-length(y)
-   ij=expand.grid(1:n,1:n)
-   ij<-ij[ij[,1]<ij[,2],]
-   ij<-ij[g[ij[,1]]==g[ij[,2]],]
-   i<-ij[,1]
-   j<-ij[,2]
-   
-   incrementda=dalpha(y[i],y[j],g[i],g[j],x[i],x[j], alpha=theta[1],beta=theta[2],
-                      sigma2=theta[3],tau2=theta[4])
-   incrementdb=dbeta(y[i],y[j],g[i],g[j],x[i],x[j],alpha=theta[1],beta=theta[2],
-                     sigma2=theta[3],tau2=theta[4])
-   incrementds=dsigma2(y[i],y[j],g[i],g[j],x[i],x[j],alpha=theta[1],beta=theta[2],
-                      sigma2=theta[3],tau2=theta[4])
-   incrementdt=dtau2(y[i],y[j],g[i],g[j],x[i],x[j], alpha=theta[1],beta=theta[2],
-                     sigma2=theta[3],tau2=theta[4])
-   
-   c(sum(incrementda), sum(incrementdb), sum(incrementds),sum(incrementdt))/T
-}
-
-
-
-###uninformative at the estimated value
-pairscore_PL(y=TwostagePoissonSample$y,g=TwostagePoissonSample$cluster, x=TwostagePoissonSample$x, estimator_PL[[1]])
-###uninformative at the true value
-pairscore_PL(y=TwostagePoissonSample$y,g=TwostagePoissonSample$cluster, x=TwostagePoissonSample$x, truevalue)
-
 
 ###informative sampling at the estimated value 
 pairscore_PL(TwostagePoissonSampleis$y, TwostagePoissonSampleis$cluster, TwostagePoissonSampleis$x, estimatoris_PL[[1]])
@@ -271,14 +306,10 @@ pairscore_PL(TwostagePoissonSampleis$y, TwostagePoissonSampleis$cluster, Twostag
 pairscore_PL(TwostagePoissonSampleis$y, TwostagePoissonSampleis$cluster, TwostagePoissonSampleis$x, truevalue)
 
 
-
-dyn.load("RIFourOrdPiTwostagePoisson.so")
 # second-order inclusion probability
 C2<-function(pos1, pos2,sc1, sc2,fss, n2infor,N2){
    .C("SecOrdPi",as.integer(pos1), as.integer(pos2),as.integer(sc1), as.integer(sc2), as.double(fss), as.double(n2infor),as.double(N2),length(pos1),rval=numeric(length(pos1)))$rval
 }
-
-
 
 # fourth-order inclusion probability
 C4<-function(pos1, pos2,pos3, pos4,sc1, sc2,sc3, sc4,fss, n2infor,N2){
@@ -286,7 +317,6 @@ C4<-function(pos1, pos2,pos3, pos4,sc1, sc2,sc3, sc4,fss, n2infor,N2){
       as.integer(sc3), as.integer(sc4), as.double(fss), as.double(n2infor),as.double(N2),length(pos1),rval=numeric(length(pos1)))$rval	
    
 }
-
 
 ##Define the second-order inclusion probability
 SecOrdPi<-function(pos1, pos2,sc1, sc2,fss, n2infor,N2){
@@ -318,6 +348,27 @@ wl2<-function(y1,y2, g1,g2, x1,x2, alpha, beta, sigma2, tau2, pos1, pos2,sc1, sc
    1/SecOrdPi(pos1, pos2,sc1, sc2, fss,  n2infor, N2)*(l2(y1,y2, g1,g2, x1,x2, alpha, beta, sigma2, tau2))
 }	
 
+pairscore_WPL<-function(y,g,x, theta, pos, sc,fss,  n2infor, N2){
+   n<-length(y)
+   ij=expand.grid(1:n,1:n)
+   ij<-ij[ij[,1]<ij[,2],]
+   ij<-ij[g[ij[,1]]==g[ij[,2]],]
+   i<-ij[,1]
+   j<-ij[,2]
+   
+   wij<-1/SecOrdPi(pos[i], pos[j],sc[i], sc[j], fss,  n2infor,N2)
+   incrementda=wij*dalpha(y[i],y[j],g[i],g[j],x[i],x[j], alpha=theta[1],beta=theta[2],
+                          sigma2=theta[3],tau2=theta[4])
+   incrementdb=wij*dbeta(y[i],y[j],g[i],g[j],x[i],x[j],alpha=theta[1],beta=theta[2],
+                         sigma2=theta[3],tau2=theta[4])
+   incrementds=wij*dsigma2(y[i],y[j],g[i],g[j],x[i],x[j],alpha=theta[1],beta=theta[2],
+                           sigma2=theta[3],tau2=theta[4])
+   incrementdt=wij*dtau2(y[i],y[j],g[i],g[j],x[i],x[j], alpha=theta[1],beta=theta[2],
+                         sigma2=theta[3],tau2=theta[4])
+   
+   
+   c(sum(incrementda), sum(incrementdb), sum(incrementds),sum(incrementdt))/T
+}
 
 #optimization (WPL)
 fit_WPL<-function(y,g,x, pos, sc,fss,  n2infor, N2,  pars){
@@ -345,15 +396,23 @@ fit_WPL<-function(y,g,x, pos, sc,fss,  n2infor, N2,  pars){
                               sigma2=theta[3],tau2=theta[4])
       c(sum(wincrementda), sum(wincrementdb), sum(wincrementds), sum(wincrementdt))/T
    }
-   optim(pars,func1,gr,  method="BFGS", control=list(fnscale=-1,parscale=c(1/n^(2/3),1/n^(2/3),1/n^(2/3),1/n^(2/3))))
+   optim(pars,func1,gr,  method="L-BFGS-B", lower=c(-Inf, -Inf, 0.1, 0), control=list(fnscale=-1,parscale=c(1/n^(2/3),1/n^(2/3),1/n^(2/3),1/n^(2/3))))
 }
 
 ##uninformative sampling WPL (with weight)
 estimator_WPL=fit_WPL(y=TwostagePoissonSample$y, g=TwostagePoissonSample$cluster, x=TwostagePoissonSample$x,
                       pos=TwostagePoissonSample$ID_unit, sc=TwostagePoissonSample$PSU, fss=pi1, n2infor=FirststagePoisson*n2, N2, 
                       pars=truevalue)
-
 estimator_WPL[[1]]-truevalue
+
+## WPL uninformative sampling at the estimated value 
+pairscore_WPL(TwostagePoissonSample$y, TwostagePoissonSample$cluster, TwostagePoissonSample$x,estimator_WPL[[1]],pos=TwostagePoissonSample$ID_unit,
+              sc=TwostagePoissonSample$PSU, fss=pi1, n2infor=FirststagePoisson*n2,N2)
+## WPL uninformative sampling at the true value
+pairscore_WPL(TwostagePoissonSample$y, TwostagePoissonSample$cluster, TwostagePoissonSample$x,truevalue,pos=TwostagePoissonSample$ID_unit,
+              sc=TwostagePoissonSample$PSU, fss=pi1, n2infor=FirststagePoisson*n2,N2)
+
+
 fitis_WPL<-function(y,g,x, pos, sc,fss,  n2infor, N2,  pars){
    n<-length(y)
    ij=expand.grid(1:n,1:n)
@@ -379,51 +438,20 @@ fitis_WPL<-function(y,g,x, pos, sc,fss,  n2infor, N2,  pars){
                              sigma2=theta[3],tau2=theta[4])
       c(sum(wincrementda), sum(wincrementdb), sum(wincrementds), sum(wincrementdt))/T
    }
-   optim(pars,func1,gr,  method="BFGS",
-         control=list(fnscale=-1))
+   optim(pars,func1,gr,  method="L-BFGS-B", lower=c(-Inf, -Inf, 0.1, 0),
+         control=list(fnscale=-1,parscale=c(1/n^2,1/n^2,1/n^0.5,1/n^0.5)))
 }
+
 
 ##informative sampling WPL (with weight)
 estimatoris_WPL=fitis_WPL(TwostagePoissonSampleis$y, TwostagePoissonSampleis$cluster,TwostagePoissonSampleis$x,
                         TwostagePoissonSampleis$ID_unit, TwostagePoissonSampleis$PSU, fss=pi1is,  n2infor=n2is , N2,  
                         pars=truevalue)
 estimatoris_WPL[[1]]-truevalue
-##Define the  weighted pairwise score function for WPL and check the value of weighted pairwise score function at WPML
-pairscore_WPL<-function(y,g,x, theta, pos, sc,fss,  n2infor, N2){
-   n<-length(y)
-   ij=expand.grid(1:n,1:n)
-   ij<-ij[ij[,1]<ij[,2],]
-   ij<-ij[g[ij[,1]]==g[ij[,2]],]
-   i<-ij[,1]
-   j<-ij[,2]
-   
-   wij<-1/SecOrdPi(pos[i], pos[j],sc[i], sc[j], fss,  n2infor,N2)
-   incrementda=wij*dalpha(y[i],y[j],g[i],g[j],x[i],x[j], alpha=theta[1],beta=theta[2],
-                          sigma2=theta[3],tau2=theta[4])
-   incrementdb=wij*dbeta(y[i],y[j],g[i],g[j],x[i],x[j],alpha=theta[1],beta=theta[2],
-                         sigma2=theta[3],tau2=theta[4])
-   incrementds=wij*dsigma2(y[i],y[j],g[i],g[j],x[i],x[j],alpha=theta[1],beta=theta[2],
-                        sigma2=theta[3],tau2=theta[4])
-   incrementdt=wij*dtau2(y[i],y[j],g[i],g[j],x[i],x[j], alpha=theta[1],beta=theta[2],
-                        sigma2=theta[3],tau2=theta[4])
-   
-   
-   c(sum(incrementda), sum(incrementdb), sum(incrementds),sum(incrementdt))/T
-}
-
-## WPL uninformative sampling at the estimated value 
-pairscore_WPL(TwostagePoissonSample$y, TwostagePoissonSample$cluster, TwostagePoissonSample$x,estimator_WPL[[1]],pos=TwostagePoissonSample$ID_unit,
-              sc=TwostagePoissonSample$PSU, fss=pi1, n2infor=FirststagePoisson*n2,N2)
-
-
-## WPL uninformative sampling at the true value
-pairscore_WPL(TwostagePoissonSample$y, TwostagePoissonSample$cluster, TwostagePoissonSample$x,truevalue,pos=TwostagePoissonSample$ID_unit,
-              sc=TwostagePoissonSample$PSU, fss=pi1, n2infor=FirststagePoisson*n2,N2)
 
 ## WPL informative sampling at the estimated value
 pairscore_WPL(TwostagePoissonSampleis$y, TwostagePoissonSampleis$cluster,TwostagePoissonSampleis$x,estimatoris_WPL[[1]],  pos=TwostagePoissonSampleis$ID_unit, sc=TwostagePoissonSampleis$PSU, 
               fss=pi1is,  n2infor=n2is,N2)
-
 ## WPL informative sampling at the true value 
 pairscore_WPL(TwostagePoissonSampleis$y, TwostagePoissonSampleis$cluster,TwostagePoissonSampleis$x,truevalue,  pos=TwostagePoissonSampleis$ID_unit, sc=TwostagePoissonSampleis$PSU, 
               fss=pi1is,  n2infor=n2is,N2)
@@ -431,14 +459,10 @@ pairscore_WPL(TwostagePoissonSampleis$y, TwostagePoissonSampleis$cluster,Twostag
 
 
 #variance estimation for PL under stratified SRSWORS
-#define the pairwise likelihood (without weight)
-#install.packages("numDeriv")
-library("numDeriv")
-
 #uninformative 
 #Calculate Hessian matrix H for PL (bread for uninformative sampling design)
 estH_PL=-jacobian(function(theta){with(TwostagePoissonSample,
-                                       pairscore_PL(y,cluster,x,theta))}, x=estimator_PL[[1]],method="simple")
+                                       pairscore_PL(y,cluster,x,theta))}, x=estimator_PL[[1]],method="complex")
 
 
 
@@ -501,7 +525,7 @@ sanestimator_PL= solve(estH_PL)%*% estJ_PL%*% solve(t(estH_PL))
 #Informative
 #Calculate Hessian matrix H for PL (bread for informative sampling design)
 estHis_PL=-jacobian(function(theta){with(TwostagePoissonSampleis,
-                                         pairscore_PL(y,cluster,x,theta))}, x=estimatoris_PL[[1]],method="simple")
+                                         pairscore_PL(y,cluster,x,theta))}, x=estimatoris_PL[[1]],method="complex")
 
 
 #Calculate  variance matrix J  for PL (meat for informative sampling design)
@@ -515,12 +539,9 @@ sanestimatoris_PL = solve(estHis_PL)%*% estJis_PL%*% t(solve(estHis_PL))
 ##define H as in page 96 of my thesis as \hat{H}(\est)
 #define weighted pairwise likelihood WPL 
 
-##uninformative sampling
+##Hessian for WPL uninformative sampling
 estH_WPL=-jacobian(function(theta){with(TwostagePoissonSample,
-                                        pairscore_WPL(y,cluster,x,theta,ID_unit,PSU, pi1, FirststagePoisson*n2, N2))}, x=estimator_WPL[[1]],method="simple")
-
-
-
+                                        pairscore_WPL(y,cluster,x,theta,ID_unit,PSU, pi1, FirststagePoisson*n2, N2))}, x=estimator_WPL[[1]],method="complex")
 
 ##define \hat{J}(\theta) as in page 97 of my thesis and  evaluate at the WPLE
 fast_J_WPL<-function(y,g,x,  pos,  sc, fss, n2infor,N2, theta){
@@ -583,8 +604,7 @@ sanestimator_WPL= solve(estH_WPL)%*% estJ_WPL%*% t(solve(estH_WPL))
 
 ##informative sampling
 estHis_WPL=-jacobian(function(theta){with(TwostagePoissonSampleis,
-                                          pairscore_WPL(y,cluster,x,theta,ID_unit,PSU, pi1is, n2is, N2))}, x=estimatoris_WPL[[1]],method="simple")
-
+                                          pairscore_WPL(y,cluster,x,theta,ID_unit,PSU, pi1is, n2is, N2))}, x=estimatoris_WPL[[1]],method="complex")
 estJis_WPL=fast_J_WPL(y=TwostagePoissonSampleis$y,g=TwostagePoissonSampleis$cluster,
                       x=TwostagePoissonSampleis$x, pos=TwostagePoissonSampleis$ID_unit,  sc=TwostagePoissonSampleis$PSU, fss=pi1is, 
                       n2infor= n2is, N2, theta=estimatoris_WPL[[1]] )
@@ -648,13 +668,17 @@ PS_PL<-matrix(0,nrow=LOTS,ncol=4)
 #Pairwise score function for PL for informative sampling at the true value 
 PS_PL_true<-matrix(0,nrow=LOTS,ncol=4)
 
+#Pairwise score function for PL for informative sampling at the census value 
+PS_PL_cen<-matrix(0,nrow=LOTS,ncol=4)
+
 #Pairwise score function for PL for  informative sampling at the estimated value
 PSis_PL<-matrix(0,nrow=LOTS,ncol=4)
 
 #Pairwise score function for PL for  informative sampling at the true value 
 PSis_PL_true<-matrix(0,nrow=LOTS,ncol=4)
 
-
+#Pairwise score function for PL for  informative sampling at the census value 
+PSis_PL_cen<-matrix(0,nrow=LOTS,ncol=4)
 
 #Pairwise score function for WPL for informative sampling at the estimated value 
 PS_WPL<-matrix(0,nrow=LOTS,ncol=4)
@@ -662,11 +686,17 @@ PS_WPL<-matrix(0,nrow=LOTS,ncol=4)
 #Pairwise score function for WPL for informative sampling at the true value 
 PS_WPL_true<-matrix(0,nrow=LOTS,ncol=4)
 
+#Pairwise score function for WPL for informative sampling at the census value 
+PS_WPL_cen<-matrix(0,nrow=LOTS,ncol=4)
+
 #Pairwise score function for WPL for  informative sampling at the estimated value 
 PSis_WPL<-matrix(0,nrow=LOTS,ncol=4)
 
 #Pairwise score function for WPL for  informative sampling at the true value 
 PSis_WPL_true<-matrix(0,nrow=LOTS,ncol=4)
+
+#Pairwise score function for WPL for  informative sampling at the census value 
+PSis_WPL_cen<-matrix(0,nrow=LOTS,ncol=4)
 
 
 
@@ -687,13 +717,7 @@ sqrt_diagGis_WPL=matrix(0, nrow=LOTS, ncol=4)
 for(i in 1:LOTS){
    
    cat(i)
-   ##Population data
-   #population$u<-rnorm(T,s=sqrt(truetau2))[population$cluster]
-   #population$x<-rnorm(N1*N2)+rnorm(T)[population$cluster]
-   #population$y<-with(population, truebeta1+truebeta2*x+u+rnorm(N1*N2,s=sqrt(truesigma2)))
-   #population$r=with(population, x*(y-truebeta1-truebeta2*x))
-   #population$ID_unit=with(population, 1:(N1*N2))
-   
+
    ##uninformative Poisson first-stage 
    pi1=runif(N1) ## sampling inclusion probability for sampling cluster
    FirststagePoisson=UPpoisson(pi1)
@@ -709,43 +733,22 @@ for(i in 1:LOTS){
 
    #informative two-stage sampling design (first-stage: Poisson, Second-stage:SRSWOR)
    ##informative Poisson first-stage sample
-   param1=c(0.5, 8)
-   pi1informative= function(r, sc,  param, N1){
-      a=rep(NA, N1)
-      b=rep(NA, N1)
-      for (k in 1: N1){
-         a[k]=mean(r[sc==k])
-         b[k]=(param[1]*exp(-param[2]*a[k]))/(1 +param[1]*exp(-param[2]*a[k]))
-      }
-      b}
    pi1is=pi1informative(population$r,population$PSU, param1 ,N1)
    FirststagePoissonis=UPpoisson(pi1is)
    n1is=sum(FirststagePoissonis) # number of PSU in the first-stage sample
    
    FirststagePoissonSampleis=subset(population, population$PSU%in% which(FirststagePoissonis==1))
    
-   
-   #informative second-stage sample(SRSWOR)
-   param2=c(0.05, 3.5)
-   n2informative= function(r, sc, param, N2){
-      a=rep(NA, length=length(unique(population$sc)))
-      b=rep(NA, length=length(unique(population$sc)))
-      for (k in unique(sc)){
-         a[k]=mean(r[sc==k])
-         b[k]=2*ceiling((param[1]*exp(-param[2]*a[k]))/(1 +param[1]*exp(-param[2]*a[k]))*N2/2)
-      }
-      b
-   }
-   
-   n2pop=n2informative(population$r,population$PSU, param2 ,N2)
-   n2is=n2pop*FirststagePoissonis
+
+   #n2pop=n2informative(population$r,population$PSU, param2 ,N2)
+   n2is=n2*FirststagePoissonis
    SecondstageSRSWORis=unlist(lapply(n2is[c(which(n2is!=0))], function(v) return(srswor(v, N2))))
    TwostagePoissonSampleis=FirststagePoissonSampleis[c(which(SecondstageSRSWORis==1)), ]
    
    
    #NML, PL and WPL (uninformative sampling)
    ra<-lmer(y~(1|cluster)+x,data=TwostagePoissonSample)
-   rb<-fit_PL(TwostagePoissonSample$y, TwostagePoissonSampleis$cluster, TwostagePoissonSampleis$x, pars=truevalue)
+   rb<-fit_PL(TwostagePoissonSample$y, TwostagePoissonSample$cluster, TwostagePoissonSample$x, pars=truevalue)
    rc<-fit_WPL(y=TwostagePoissonSample$y, g=TwostagePoissonSample$cluster, x=TwostagePoissonSample$x,
                pos=TwostagePoissonSample$ID_unit, sc=TwostagePoissonSample$PSU, fss=pi1, n2infor=FirststagePoisson*n2, N2, 
                pars=truevalue)
@@ -782,7 +785,7 @@ for(i in 1:LOTS){
    
    
    #Calculate Hessian matrix H for PL (bread for uninformative sampling design)
-   H_PL[,,i]=-jacobian(function(theta){with(TwostagePoissonSample, pairscore_PL(y,cluster,x,theta)) }, x=rb[[1]],method="simple")
+   H_PL[,,i]=-jacobian(function(theta){with(TwostagePoissonSample, pairscore_PL(y,cluster,x,theta)) }, x=rb[[1]],method="complex")
       
       #Calculate  variance matrix J  for PL (meat for uniformative sampling design)
       J_PL[, , i]=fast_J_PL(y=TwostagePoissonSample$y, g=TwostagePoissonSample$cluster, x=TwostagePoissonSample$x,
@@ -793,11 +796,20 @@ for(i in 1:LOTS){
       G_PL[, ,i] = tryCatch(solve(H_PL[,,i])%*% J_PL[, , i]%*% t(solve(H_PL[,,i])), error=function(e) matrix(NaN, 4,4)) 
       
       #Pairwise score function PL (uninformative sampling)
+      PS_PL[i, ]<- pairscore_PL(y=TwostagePoissonSample$y,g=TwostagePoissonSample$cluster, x=TwostagePoissonSample$x,
+                                     theta=rb[[1]])
+      
+      #Pairwise score function PL (uninformative sampling)
       PS_PL_true[i, ]<- pairscore_PL(y=TwostagePoissonSample$y,g=TwostagePoissonSample$cluster, x=TwostagePoissonSample$x,
                                 theta=truevalue)
       
+      #Pairwise score function PL (uninformative sampling)
+      PS_PL_cen[i, ]<- pairscore_PL(y=TwostagePoissonSample$y,g=TwostagePoissonSample$cluster, x=TwostagePoissonSample$x,
+                                     theta=cen_PL[[1]])
+      
+      
       #Calculate Hessian matrix H for PL (bread for informative sampling design)
-       His_PL[,,i]=-jacobian(function(theta){with(TwostagePoissonSampleis, pairscore_PL(y,cluster,x,theta))},  x=rbis[[1]], method="simple")
+       His_PL[,,i]=-jacobian(function(theta){with(TwostagePoissonSampleis, pairscore_PL(y,cluster,x,theta))},  x=rbis[[1]], method="complex")
          
          #Calculate  variance matrix J  for PL (meat for informative sampling design)
          Jis_PL[, , i]=fast_J_PL(y=TwostagePoissonSampleis$y,g=TwostagePoissonSampleis$cluster,x=TwostagePoissonSampleis$x,pos=TwostagePoissonSampleis$ID_unit,  
@@ -807,13 +819,20 @@ for(i in 1:LOTS){
          Gis_PL[, ,i] =  tryCatch(solve(His_PL[,,i])%*% Jis_PL[, , i]%*% t(solve(His_PL[,,i])),  error=function(e) matrix(NaN, 4,4)) 
          
          #Pairwise score function PL (informative sampling)
+         PSis_PL[i, ]<- pairscore_PL(y=TwostagePoissonSampleis$y,g=TwostagePoissonSampleis$cluster, x=TwostagePoissonSampleis$x,
+                                          theta=rbis[[1]])
+         
+         #Pairwise score function PL (informative sampling)
          PSis_PL_true[i, ]<- pairscore_PL(y=TwostagePoissonSampleis$y,g=TwostagePoissonSampleis$cluster, x=TwostagePoissonSampleis$x,
                                      theta=truevalue)
+         #Pairwise score function PL (informative sampling)
+         PSis_PL_cen[i, ]<- pairscore_PL(y=TwostagePoissonSampleis$y,g=TwostagePoissonSampleis$cluster, x=TwostagePoissonSampleis$x,
+                                          theta=cen_PL[[1]])
          
          #Calculate Hessian matrix H for WPL (bread for uninformative sampling design)
    
          H_WPL[,,i]=-jacobian(function(theta){with(TwostagePoissonSample,
-                                                      pairscore_WPL(y,cluster,x,theta, ID_unit, PSU, pi1, FirststagePoisson*n2, N2 ))}, x=rc[[1]],method="simple")
+                                                      pairscore_WPL(y,cluster,x,theta, ID_unit, PSU, pi1, FirststagePoisson*n2, N2 ))}, x=rc[[1]],method="complex")
             
 
             
@@ -826,15 +845,24 @@ for(i in 1:LOTS){
             G_WPL[, ,i] =tryCatch(solve(H_WPL[,,i])%*% J_WPL[, , i]%*% t(solve(H_WPL[,,i])), error=function(e) matrix(NaN, 4,4)) 
             
             #Pairwise score function WPL (uninformative sampling)
+            PS_WPL[i, ]<- pairscore_WPL(TwostagePoissonSample$y, TwostagePoissonSample$cluster, TwostagePoissonSample$x,
+                                             theta=rc[[1]],   TwostagePoissonSample$ID_unit, TwostagePoissonSample$PSU, fss=pi1, n2infor=FirststagePoisson*n2, N2)
+            
+            #Pairwise score function WPL (uninformative sampling)
             PS_WPL_true[i, ]<- pairscore_WPL(TwostagePoissonSample$y, TwostagePoissonSample$cluster, TwostagePoissonSample$x,
                                         theta=truevalue,   TwostagePoissonSample$ID_unit, TwostagePoissonSample$PSU, fss=pi1, n2infor=FirststagePoisson*n2, N2)
+            
+            #Pairwise score function WPL (uninformative sampling)
+            PS_WPL_cen[i, ]<- pairscore_WPL(TwostagePoissonSample$y, TwostagePoissonSample$cluster, TwostagePoissonSample$x,
+                                             theta=cen_PL[[1]],   TwostagePoissonSample$ID_unit, TwostagePoissonSample$PSU, fss=pi1, n2infor=FirststagePoisson*n2, N2)
+            
             
             #Calculate Hessian matrix H  for WPL (bread for informative sampling design)
             ##informative sampling
    
             
             His_WPL[,,i]=-jacobian(function(theta){with(TwostagePoissonSampleis,
-                                                           pairscore_WPL(y,cluster,x,theta, ID_unit, PSU, pi1is, n2is, N2))}, x=rcis[[1]],method="simple")
+                                                           pairscore_WPL(y,cluster,x,theta, ID_unit, PSU, pi1is, n2is, N2))}, x=rcis[[1]],method="complex")
                
                #Calculate Variance matrix J  for WPL (meat for  informative sampling design)
             Jis_WPL[, , i]=fast_J_WPL(y=TwostagePoissonSampleis$y,g=TwostagePoissonSampleis$cluster,
@@ -846,9 +874,15 @@ for(i in 1:LOTS){
                
                
                #Pairwise score function WPL (informative sampling)
+               PSis_WPL[i, ]<- pairscore_WPL(TwostagePoissonSampleis$y, TwostagePoissonSampleis$cluster,TwostagePoissonSampleis$x,
+                                                  theta=rcis[[1]],TwostagePoissonSampleis$ID_unit, TwostagePoissonSampleis$PSU, fss=pi1is,  n2infor=n2is , N2)
+               
+               #Pairwise score function WPL (informative sampling)
                PSis_WPL_true[i, ]<- pairscore_WPL(TwostagePoissonSampleis$y, TwostagePoissonSampleis$cluster,TwostagePoissonSampleis$x,
                                              theta=truevalue,TwostagePoissonSampleis$ID_unit, TwostagePoissonSampleis$PSU, fss=pi1is,  n2infor=n2is , N2)
-               
+               #Pairwise score function WPL (informative sampling)
+               PSis_WPL_cen[i, ]<- pairscore_WPL(TwostagePoissonSampleis$y, TwostagePoissonSampleis$cluster,TwostagePoissonSampleis$x,
+                                                  theta=cen_PL[[1]],TwostagePoissonSampleis$ID_unit, TwostagePoissonSampleis$PSU, fss=pi1is,  n2infor=n2is , N2)
                
                sqrt_diagJ_PL[i,]= sqrt(diag(J_PL[,,i]))
                sqrt_diagJis_PL[i,]= sqrt(diag(Jis_PL[,,i]))
@@ -864,11 +898,7 @@ for(i in 1:LOTS){
 }
 
 
-
-
 #boxplot for uninformative sampling (NML, PL and WPL)
-# install.packages("RColorBrewer")
-library(RColorBrewer)
 color<-c("#a6cee3", "#1f78b4", "#b2df8a", "#33a02c")
 
 #boxplot for uninformative sampling (NML, PL and WPL)
@@ -881,11 +911,6 @@ abline(h=0)
 #boxplot for informative sampling (NML,PL and WPL)
 boxplot(cbind(Fitis_NML[,c(1:4)],Fitis_PL[,c(1:4)], Fitis_WPL[,c(1:4)]) ,   col=color)
 abline(h=0)
-
-
-
-#install.packages("xtable")
-library(xtable)
 
 construct_header <- function(df, grp_names, span, align = "c", draw_line = T) {
    if (length(align) == 1) align <- rep(align, length(grp_names))
@@ -959,11 +984,12 @@ print(xtable(vardf), add.to.row = vardf_header, include.rownames = F, hline.afte
 
 #bias and sd for informative sampling (NML, PL, WPL)
 dfis<- matrix(c(apply(Fitis_NML, 2,  median), apply(Fitis_NML, 2, mad), apply(Fitis_PL, 2, median), apply(Fitis_PL, 2, mad), apply(sqrt_diagGis_PL, 2, function(x) median(x, na.rm=TRUE)),  apply(Fitis_WPL, 2, median), apply(Fitis_WPL, 2, mad),
-                apply(sqrt_diagGis_WPL, 2, median(x, na.rm=TRUE))),ncol=8)
+                apply(sqrt_diagGis_WPL, 2, function(x) median(x, na.rm=TRUE))),ncol=8)
 
 dfis=round(dfis, 2)
 dfis<-cbind(c("beta_0", "beta_1", "sigma^2", "tau^2"), dfis)
-colnames(dfis)<-c("parameter", c("bias", "sd"), rep(c("bias", "sd", "esd"), 2))
+colnames(dfis)<-c("parameter", c("median bias", "mad"), c("median bias", "mad", "esd",
+"median bias", "mad", "esd"))
 dfis
 dfis_header <- construct_header(
    # the data.frame or matrix that should be plotted
@@ -981,7 +1007,7 @@ print(xtable(dfis), add.to.row = dfis_header, include.rownames = F,  hline.after
 vardfis<-matrix(c( apply(PSis_PL_true, 2, median),apply(PSis_PL_true, 2, mad),  apply(sqrt_diagJis_PL, 2, function(x) median(x, na.rm=TRUE)) , apply(PSis_WPL_true, 2, median),apply(PSis_WPL_true, 2, mad),  apply(sqrt_diagJis_WPL, 2, function(x) median(x, na.rm=TRUE))),ncol=6)
 vardfis<-round(vardfis,2)
 vardfis<-cbind(c("beta_0", "beta_1", "sigma^2", "tau^2"), vardfis)
-colnames(vardfis)<-c("parameter", c( "median", "mad", "esd","median", "mad", "esd" ))
+colnames(vardfis)<-c("parameter", c( "median bias", "mad", "esd","median bias", "mad", "esd" ))
 vardfis
 vardfis_header <- construct_header(
    # the data.frame or matrix that should be plotted
@@ -995,5 +1021,7 @@ vardfis_header <- construct_header(
 )
 
 print(xtable(vardfis), add.to.row = vardfis_header, include.rownames = F, hline.after = F, latex.environments=NULL,booktabs=TRUE)   
+
+
 
 
